@@ -27,7 +27,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-# Database connection function
+# ==================== Database ====================
+
 def get_db_connection():
     try:
         conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -37,6 +38,7 @@ def get_db_connection():
         return None
 
 # ==================== Namespaces ====================
+
 ns_track = Namespace('track', description='Track API calls')
 ns_stats = Namespace('stats', description='API usage statistics')
 ns_health = Namespace('health', description='Health check endpoints')
@@ -191,7 +193,8 @@ class Track(Resource):
         data = request.json or {}
         endpoint_called = data.get('calledService')
 
-        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        ip = raw_ip.split(',')[0].strip()
 
         success = log_call(endpoint=endpoint_called, method="POST", ip=ip, request_body=data)
         if success:
@@ -245,7 +248,9 @@ class Health(Resource):
 def log_every_request():
     excluded = ['stats_last_called', 'stats_most_frequent', 'stats_counts', 'track_track', 'health_health']
     if request.endpoint and request.endpoint not in excluded:
-        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        ip = raw_ip.split(',')[0].strip()
+
         log_call(
             endpoint=request.path,
             method=request.method,
@@ -254,6 +259,7 @@ def log_every_request():
         )
 
 # ==================== Run ====================
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
