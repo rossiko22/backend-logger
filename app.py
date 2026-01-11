@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from flask_restx import Api, Resource, fields
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -6,24 +6,22 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 
+# Load .env locally (Render ignores this and uses real env vars)
+load_dotenv()
+
 app = Flask(__name__)
 api = Api(app, version="1.1", title="API Stats Service",
           description="Track API usage stats with RESTful endpoints")
 
-load_dotenv()
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-DB_CONFIG = {
-    "host": os.getenv("DB_HOST"),
-    "port": os.getenv("DB_PORT"),
-    "dbname": os.getenv("DB_NAME"),
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-}
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
 
-# Database connection function with error handling
+# Database connection function
 def get_db_connection():
     try:
-        conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
         return conn
     except Exception as e:
         print("Database connection error:", e)
@@ -59,7 +57,12 @@ def get_last_called():
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT endpoint, method, ip_address, called_at FROM api_calls ORDER BY called_at DESC LIMIT 1")
+            cur.execute("""
+                SELECT endpoint, method, ip_address, called_at
+                FROM api_calls
+                ORDER BY called_at DESC
+                LIMIT 1
+            """)
             return cur.fetchone()
     except Exception as e:
         print("Error fetching last called:", e)
@@ -73,7 +76,13 @@ def get_most_frequent():
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT endpoint, COUNT(*) as count FROM api_calls GROUP BY endpoint ORDER BY count DESC LIMIT 1")
+            cur.execute("""
+                SELECT endpoint, COUNT(*) as count
+                FROM api_calls
+                GROUP BY endpoint
+                ORDER BY count DESC
+                LIMIT 1
+            """)
             return cur.fetchone()
     except Exception as e:
         print("Error fetching most frequent:", e)
@@ -87,7 +96,11 @@ def get_counts():
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT endpoint, COUNT(*) as count FROM api_calls GROUP BY endpoint")
+            cur.execute("""
+                SELECT endpoint, COUNT(*) as count
+                FROM api_calls
+                GROUP BY endpoint
+            """)
             return cur.fetchall()
     except Exception as e:
         print("Error fetching counts:", e)
@@ -101,7 +114,7 @@ class Track(Resource):
     @api.expect(post_model)
     def post(self):
         """Log a remote call (POST body: {calledService: /endpoint})"""
-        data = request.json
+        data = request.json or {}
         endpoint_called = data.get('calledService')
         ip = request.headers.get('X-Forwarded-For', request.remote_addr)
 
@@ -115,7 +128,6 @@ class Track(Resource):
 @api.route('/stats/last')
 class LastCalled(Resource):
     def get(self):
-        """Return the last called endpoint"""
         last = get_last_called()
         if last:
             return {"last_called": last}, 200
@@ -125,7 +137,6 @@ class LastCalled(Resource):
 @api.route('/stats/most')
 class MostFrequent(Resource):
     def get(self):
-        """Return the most frequently called endpoint"""
         most = get_most_frequent()
         if most:
             return {"most_frequent": most}, 200
@@ -135,7 +146,6 @@ class MostFrequent(Resource):
 @api.route('/stats/counts')
 class Counts(Resource):
     def get(self):
-        """Return the number of individual calls to each endpoint"""
         counts = get_counts()
         if counts:
             return {"counts": counts}, 200
@@ -145,10 +155,14 @@ class Counts(Resource):
 # --- Optional: log all incoming requests automatically ---
 @app.before_request
 def log_every_request():
-    if request.endpoint not in ['lastcalled', 'mostfrequent', 'counts', 'track']:  # avoid double logging
+    if request.endpoint not in ['lastcalled', 'mostfrequent', 'counts', 'track']:
         ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        log_call(endpoint=request.path, method=request.method,
-                 ip=ip, request_body=request.json if request.is_json else None)
+        log_call(
+            endpoint=request.path,
+            method=request.method,
+            ip=ip,
+            request_body=request.json if request.is_json else None
+        )
 
 # --- Run ---
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/api-stats-service
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/backend-logger
 
 jobs:
   build-test:
