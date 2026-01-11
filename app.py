@@ -16,7 +16,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# CORS configuration for local frontends calling cloud API
+# Allow local frontends to call the cloud API
 CORS(
     app,
     supports_credentials=True,
@@ -31,7 +31,7 @@ api = Api(
     app,
     version="1.2",
     title="API Stats Service",
-    description="A comprehensive API for tracking and analyzing API usage statistics with PostgreSQL backend",
+    description="Track and analyze API usage statistics",
     doc="/docs",
 )
 
@@ -42,75 +42,29 @@ if not DATABASE_URL:
 # ==================== Database ====================
 
 def get_db_connection():
-    try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        return conn
-    except Exception as e:
-        print("Database connection error:", e)
-        return None
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 # ==================== Namespaces ====================
 
 ns_track = Namespace('track', description='Track API calls')
 ns_stats = Namespace('stats', description='API usage statistics')
-ns_health = Namespace('health', description='Health check endpoints')
+ns_health = Namespace('health', description='Health check')
 
 api.add_namespace(ns_track, path='/track')
 api.add_namespace(ns_stats, path='/stats')
 api.add_namespace(ns_health, path='/health')
 
-# ==================== Swagger Models ====================
+# ==================== Models ====================
 
 track_request_model = api.model('TrackRequest', {
-    'id': fields.Integer(required=True, description='External service ID'),
-    'calledService': fields.String(required=True, description='Endpoint that was called remotely')
+    'id': fields.Integer(required=True, description="External user/service ID"),
+    'calledService': fields.String(required=True, description="Endpoint that was called")
 })
 
-track_response_model = api.model('TrackResponse', {
-    'message': fields.String,
-    'ip': fields.String
-})
-
-call_info_model = api.model('CallInfo', {
-    'endpoint': fields.String,
-    'method': fields.String,
-    'ip_address': fields.String,
-    'called_at': fields.DateTime
-})
-
-last_called_response_model = api.model('LastCalledResponse', {
-    'last_called': fields.Nested(call_info_model)
-})
-
-frequency_info_model = api.model('FrequencyInfo', {
-    'endpoint': fields.String,
-    'count': fields.Integer
-})
-
-most_frequent_response_model = api.model('MostFrequentResponse', {
-    'most_frequent': fields.Nested(frequency_info_model)
-})
-
-counts_response_model = api.model('CountsResponse', {
-    'counts': fields.List(fields.Nested(frequency_info_model))
-})
-
-health_response_model = api.model('HealthResponse', {
-    'status': fields.String,
-    'database': fields.String,
-    'timestamp': fields.DateTime
-})
-
-# ==================== Utility Functions ====================
+# ==================== Helpers ====================
 
 def log_call(external_user_id, endpoint, method, ip, request_body=None, status_code=200):
-    if not endpoint:
-        return False
-
     conn = get_db_connection()
-    if not conn:
-        return False
-
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -121,7 +75,7 @@ def log_call(external_user_id, endpoint, method, ip, request_body=None, status_c
                 endpoint,
                 method,
                 ip,
-                Json(request_body) if request_body is not None else None,
+                Json(request_body) if request_body else None,
                 status_code,
                 datetime.now()
             ))
@@ -129,21 +83,19 @@ def log_call(external_user_id, endpoint, method, ip, request_body=None, status_c
         return True
     except Exception as e:
         print("Error logging call:", e)
-        if conn:
-            conn.rollback()
+        conn.rollback()
         return False
     finally:
-        if conn:
-            conn.close()
+        conn.close()
+
+# ==================== Queries ====================
 
 def get_last_called():
     conn = get_db_connection()
-    if not conn:
-        return None
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT endpoint, method, ip_address, called_at
+                SELECT external_user_id, endpoint, method, ip_address, called_at
                 FROM api_calls
                 ORDER BY called_at DESC
                 LIMIT 1
@@ -154,15 +106,13 @@ def get_last_called():
 
 def get_most_frequent():
     conn = get_db_connection()
-    if not conn:
-        return None
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT endpoint, COUNT(*) as count
+                SELECT endpoint, COUNT(*) AS total_calls
                 FROM api_calls
                 GROUP BY endpoint
-                ORDER BY count DESC
+                ORDER BY total_calls DESC
                 LIMIT 1
             """)
             return cur.fetchone()
@@ -171,29 +121,15 @@ def get_most_frequent():
 
 def get_counts():
     conn = get_db_connection()
-    if not conn:
-        return None
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT endpoint, COUNT(*) as count
+                SELECT endpoint, COUNT(*) AS total_calls
                 FROM api_calls
                 GROUP BY endpoint
-                ORDER BY count DESC
+                ORDER BY total_calls DESC
             """)
             return cur.fetchall()
-    finally:
-        conn.close()
-
-def check_database_health():
-    conn = get_db_connection()
-    if not conn:
-        return False
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        return True
     finally:
         conn.close()
 
@@ -202,84 +138,78 @@ def check_database_health():
 @ns_track.route('/')
 class Track(Resource):
     @ns_track.expect(track_request_model, validate=True)
-    @ns_track.marshal_with(track_response_model, code=201)
     def post(self):
-        data = request.json or {}
-        external_user_id = data.get('id')
-        endpoint_called = data.get('calledService')
-
+        data = request.json
         raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         ip = raw_ip.split(',')[0].strip()
 
         success = log_call(
-            external_user_id=external_user_id,
-            endpoint=endpoint_called,
+            external_user_id=data['id'],
+            endpoint=data['calledService'],
             method="POST",
             ip=ip,
             request_body=data
         )
 
         if success:
-            return {"message": f"Logged call to {endpoint_called}", "ip": ip}, 201
-        else:
-            ns_track.abort(500, 'Failed to log call to database')
+            return {
+                "message": "Logged successfully",
+                "endpoint": data['calledService']
+            }, 201
+
+        return {"error": "Logging failed"}, 500
+
 
 @ns_stats.route('/last')
-class LastCalled(Resource):
+class Last(Resource):
     def get(self):
-        last = get_last_called()
-        if last:
-            return {"last_called": last}, 200
-        else:
-            ns_stats.abort(500, 'Unable to fetch last called endpoint')
+        row = get_last_called()
+        if not row:
+            return {"message": "No data yet"}, 200
+
+        return {
+            "last_called": {
+                "user_id": row["external_user_id"],
+                "endpoint": row["endpoint"],
+                "method": row["method"],
+                "ip": row["ip_address"],
+                "time": row["called_at"]
+            }
+        }
+
 
 @ns_stats.route('/most')
-class MostFrequent(Resource):
+class Most(Resource):
     def get(self):
-        most = get_most_frequent()
-        if most:
-            return {"most_frequent": most}, 200
-        else:
-            ns_stats.abort(500, 'Unable to fetch most frequent endpoint')
+        row = get_most_frequent()
+        if not row:
+            return {"message": "No data yet"}, 200
+
+        return {
+            "most_frequent": {
+                "endpoint": row["endpoint"],
+                "total_calls": row["total_calls"]
+            }
+        }
+
 
 @ns_stats.route('/counts')
 class Counts(Resource):
     def get(self):
-        counts = get_counts()
-        if counts:
-            return {"counts": counts}, 200
-        else:
-            ns_stats.abort(500, 'Unable to fetch counts')
+        rows = get_counts()
+        return {
+            "counts": [
+                {"endpoint": r["endpoint"], "total_calls": r["total_calls"]}
+                for r in rows
+            ]
+        }
+
 
 @ns_health.route('/')
 class Health(Resource):
     def get(self):
-        db_healthy = check_database_health()
-        if db_healthy:
-            return {
-                'status': 'healthy',
-                'database': 'connected',
-                'timestamp': datetime.now()
-            }, 200
-        else:
-            ns_health.abort(503, 'Database connection failed')
+        return {"status": "ok", "time": datetime.now()}
 
-# ==================== Middleware ====================
-
-@app.before_request
-def log_every_request():
-    excluded = ['stats_last_called', 'stats_most_frequent', 'stats_counts', 'track_track', 'health_health']
-    if request.endpoint and request.endpoint not in excluded:
-        raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        ip = raw_ip.split(',')[0].strip()
-
-        log_call(
-            external_user_id=None,
-            endpoint=request.path,
-            method=request.method,
-            ip=ip,
-            request_body=request.json if request.is_json else None
-        )
 
 # ==================== Run ====================
 
