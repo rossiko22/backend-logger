@@ -1,0 +1,4 @@
+Flask
+Flask-RESTX
+psycopg2-binary
+dotenv
