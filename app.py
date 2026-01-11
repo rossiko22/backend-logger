@@ -4,6 +4,7 @@ API Stats Service - A Flask RESTful API for tracking and analyzing API usage sta
 
 from flask import Flask, request
 from flask_restx import Api, Resource, fields, Namespace
+from flask_cors import CORS
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from datetime import datetime
@@ -14,6 +15,12 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app, origins=[
+    "http://localhost:4201",
+    "http://localhost:5173",
+    "*"
+])
+
 api = Api(
     app,
     version="1.2",
@@ -23,7 +30,6 @@ api = Api(
 )
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
@@ -50,6 +56,7 @@ api.add_namespace(ns_health, path='/health')
 # ==================== Swagger Models ====================
 
 track_request_model = api.model('TrackRequest', {
+    'id': fields.Integer(required=True, description='External service ID'),
     'calledService': fields.String(required=True, description='Endpoint that was called remotely')
 })
 
@@ -90,7 +97,7 @@ health_response_model = api.model('HealthResponse', {
 
 # ==================== Utility Functions ====================
 
-def log_call(endpoint, method, ip, request_body=None, status_code=200):
+def log_call(external_user_id, endpoint, method, ip, request_body=None, status_code=200):
     if not endpoint:
         return False
 
@@ -101,9 +108,10 @@ def log_call(endpoint, method, ip, request_body=None, status_code=200):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO api_calls (endpoint, method, ip_address, request_body, status_code, called_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO api_calls (external_user_id, endpoint, method, ip_address, request_body, status_code, called_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
+                external_user_id,
                 endpoint,
                 method,
                 ip,
@@ -191,12 +199,19 @@ class Track(Resource):
     @ns_track.marshal_with(track_response_model, code=201)
     def post(self):
         data = request.json or {}
+        external_user_id = data.get('id')
         endpoint_called = data.get('calledService')
-
         raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         ip = raw_ip.split(',')[0].strip()
 
-        success = log_call(endpoint=endpoint_called, method="POST", ip=ip, request_body=data)
+        success = log_call(
+            external_user_id=external_user_id,
+            endpoint=endpoint_called,
+            method="POST",
+            ip=ip,
+            request_body=data
+        )
+
         if success:
             return {"message": f"Logged call to {endpoint_called}", "ip": ip}, 201
         else:
@@ -252,6 +267,7 @@ def log_every_request():
         ip = raw_ip.split(',')[0].strip()
 
         log_call(
+            external_user_id=None,
             endpoint=request.path,
             method=request.method,
             ip=ip,

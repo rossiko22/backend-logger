@@ -14,6 +14,7 @@ DROP TABLE IF EXISTS api_calls;
 
 CREATE TABLE api_calls (
     id SERIAL PRIMARY KEY,
+    external_user_id INTEGER,
     endpoint TEXT NOT NULL,
     method TEXT NOT NULL,
     ip_address TEXT,
