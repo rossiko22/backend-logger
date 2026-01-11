@@ -173,7 +173,7 @@ class Last(Resource):
                 "endpoint": row["endpoint"],
                 "method": row["method"],
                 "ip": row["ip_address"],
-                "time": row["called_at"]
+                "time": row["called_at"].isoformat()
             }
         }
 
