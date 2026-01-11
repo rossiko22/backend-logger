@@ -122,7 +122,6 @@ health_response_model = api.model('HealthResponse', {
 # ==================== Utility Functions ====================
 
 def log_call(endpoint, method, ip, request_body=None, status_code=200):
-    """Log an API call to the database"""
     if not endpoint:
         print("Warning: endpoint is None or empty")
         return False
@@ -137,7 +136,14 @@ def log_call(endpoint, method, ip, request_body=None, status_code=200):
             cur.execute("""
                 INSERT INTO api_calls (endpoint, method, ip_address, request_body, status_code, called_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (endpoint, method, ip, request_body, status_code, datetime.now()))
+            """, (
+                endpoint,
+                method,
+                ip,
+                Json(request_body) if request_body is not None else None,
+                status_code,
+                datetime.now()
+            ))
             conn.commit()
         return True
     except Exception as e:

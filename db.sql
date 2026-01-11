@@ -10,15 +10,16 @@ GRANT ALL PRIVILEGES ON DATABASE api_service_db TO api_user;
 -- 4. Connect to the database
 \c api_service_db
 
--- 5. Create the table to log API calls
+DROP TABLE IF EXISTS api_calls;
+
 CREATE TABLE api_calls (
-    id SERIAL PRIMARY KEY,                  -- Auto-increment ID
-    endpoint VARCHAR(255) NOT NULL,        -- API endpoint called
-    method VARCHAR(10) NOT NULL,           -- HTTP method (GET, POST, etc.)
-    ip_address VARCHAR(45) NOT NULL,       -- IPv4 or IPv6 of the caller
-    request_body JSONB,                    -- POST request body (optional)
-    status_code INT,                       -- HTTP response status code
-    called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- Timestamp of call
+    id SERIAL PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    method TEXT NOT NULL,
+    ip_address TEXT,
+    request_body JSONB,
+    status_code INTEGER,
+    called_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- Optional: check table structure
