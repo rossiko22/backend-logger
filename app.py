@@ -15,11 +15,17 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=[
-    "http://localhost:4201",
-    "http://localhost:5173",
-    "*"
-])
+
+# CORS configuration for local frontends calling cloud API
+CORS(
+    app,
+    supports_credentials=True,
+    origins=[
+        "http://localhost:4201",
+        "http://localhost:4200",
+        "http://localhost:5173",
+    ]
+)
 
 api = Api(
     app,
@@ -201,6 +207,7 @@ class Track(Resource):
         data = request.json or {}
         external_user_id = data.get('id')
         endpoint_called = data.get('calledService')
+
         raw_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         ip = raw_ip.split(',')[0].strip()
 
